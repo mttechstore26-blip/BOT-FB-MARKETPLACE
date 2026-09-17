@@ -1,0 +1,11 @@
+[Unit]
+Description=Controlla Facebook Marketplace ogni 5 minuti
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=20s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

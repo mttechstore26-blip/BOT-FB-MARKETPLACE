@@ -1,0 +1,14 @@
+[Unit]
+Description=Facebook Marketplace Telegram Menu
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/facebook-marketplace-monitor
+ExecStart=/opt/facebook-marketplace-monitor/.venv/bin/python /opt/facebook-marketplace-monitor/telegram_bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

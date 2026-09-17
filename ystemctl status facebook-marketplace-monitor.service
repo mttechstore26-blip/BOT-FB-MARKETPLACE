@@ -1,0 +1,7 @@
+[0;1;32m●[0m facebook-marketplace-monitor.timer - Controlla Facebook Marketplace ogni 5 minuti
+     Loaded: loaded (]8;;file://vmi3581954/etc/systemd/system/facebook-marketplace-monitor.timer/etc/systemd/system/facebook-marketplace-monitor.timer]8;;; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+     Active: [0;1;32mactive (running)[0m since Thu 2026-09-17 23:52:11 CEST; 16s ago
+    Trigger: n/a
+   Triggers: ● facebook-marketplace-monitor.service
+
+Sep 17 23:52:11 vmi3581954 systemd[1]: Started facebook-marketplace-monitor.timer - Controlla Facebook Marketplace ogni 5 minuti.

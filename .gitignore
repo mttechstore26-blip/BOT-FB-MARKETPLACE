@@ -1,0 +1,24 @@
+# Segreti
+.env
+.env.*
+facebook_state.json
+
+# Database locale
+marketplace.db
+marketplace.db.*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Backup sviluppo
+*.backup-*
+
+# Screenshot/debug
+dm_debug.png
+dm_dry_run_failed.png
+dm_dry_run_final.png
+
+# macOS
+.DS_Store
