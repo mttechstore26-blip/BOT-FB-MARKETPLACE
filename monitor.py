@@ -245,6 +245,17 @@ def send_session_alert(message):
         print("⚠️ Errore invio alert sessione:", exc)
 
 
+def save_facebook_state(context):
+    """Salva cookie e storage aggiornati durante la navigazione."""
+    try:
+        context.storage_state(path=FACEBOOK_STATE)
+        print("💾 Sessione Facebook aggiornata e salvata")
+        return True
+    except Exception as exc:
+        print("⚠️ Impossibile salvare la sessione Facebook:", exc)
+        return False
+
+
 def check_facebook_session(context):
     page = context.new_page()
 
@@ -1144,6 +1155,11 @@ def main():
 
         print("✅ Sessione Facebook valida")
 
+        # Facebook può rinnovare cookie/token durante il controllo.
+        # Salviamo subito lo stato aggiornato per non ripartire
+        # al prossimo ciclo con cookie ormai vecchi.
+        save_facebook_state(context)
+
         if previous_status == "invalid":
             send_session_alert(
                 "✅ SESSIONE FACEBOOK RIPRISTINATA\n\n"
@@ -1167,6 +1183,10 @@ def main():
                     f"❌ Errore ricerca "
                     f"{search['query']}: {exc}"
                 )
+
+        # Durante le ricerche Facebook può aver ruotato altri cookie.
+        # Persistiamo nuovamente lo stato prima di chiudere Chromium.
+        save_facebook_state(context)
 
         browser.close()
 
