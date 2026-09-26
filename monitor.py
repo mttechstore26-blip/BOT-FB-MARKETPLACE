@@ -169,6 +169,114 @@ def blacklist_match(title, description, blacklist):
     return None
 
 
+SUGGESTION_MARKERS = {
+    "more options",
+    "altre opzioni",
+    "more results",
+    "altri risultati",
+}
+
+
+def is_suggestion_card(text):
+    """Scarta le card che Facebook aggiunge come suggerimenti fuori ricerca."""
+    lines = [
+        normalize_text(line)
+        for line in (text or "").splitlines()
+        if line.strip()
+    ]
+
+    return any(
+        line in SUGGESTION_MARKERS
+        for line in lines
+    )
+
+
+def query_matches_listing(query, title, description=""):
+    """
+    Controllo prudente di pertinenza.
+    Evita risultati totalmente estranei senza bloccare annunci validi
+    come "PS5 con controller".
+    """
+    query_n = normalize_text(query)
+    combined = normalize_text(
+        f"{title or ''} {description or ''}"
+    )
+
+    if not query_n or not combined:
+        return True
+
+    aliases = {
+        "ps portal": (
+            "ps portal",
+            "playstation portal",
+            "play station portal",
+        ),
+        "playstation portal": (
+            "ps portal",
+            "playstation portal",
+            "play station portal",
+        ),
+        "ps5": (
+            "ps5",
+            "playstation 5",
+            "play station 5",
+            "play 5",
+        ),
+        "playstation 5": (
+            "ps5",
+            "playstation 5",
+            "play station 5",
+            "play 5",
+        ),
+        "nintendo switch": (
+            "nintendo switch",
+            "switch oled",
+            "switch lite",
+            "switch",
+        ),
+    }
+
+    if query_n in aliases:
+        return any(
+            alias in combined
+            for alias in aliases[query_n]
+        )
+
+    # Per iPhone richiediamo modello e varianti indicate nella query.
+    if query_n.startswith("iphone "):
+        required = [
+            token
+            for token in query_n.split()
+            if token not in {"apple"}
+        ]
+        return all(token in combined for token in required)
+
+    # Match esatto/frase: prima scelta per le altre ricerche.
+    if query_n in combined:
+        return True
+
+    # Fallback generico: per query composte servono almeno due termini
+    # significativi; per una query di una parola deve comparire quella parola.
+    tokens = [
+        token
+        for token in query_n.split()
+        if len(token) >= 2
+    ]
+
+    if not tokens:
+        return True
+
+    hits = sum(
+        1 for token in tokens
+        if token in combined
+    )
+
+    if len(tokens) == 1:
+        return hits == 1
+
+    return hits >= 2
+
+
 # =========================================================
 # URL FACEBOOK
 # =========================================================
@@ -806,7 +914,9 @@ def update_recent_messages():
 # SINGOLA RICERCA
 # =========================================================
 
-def process_search(context, search):
+def process_search(context, search, cycle_notified=None):
+    if cycle_notified is None:
+        cycle_notified = set()
     search_id = search["id"]
     query_name = search["query"]
 
@@ -858,6 +968,12 @@ def process_search(context, search):
                 continue
 
             if "/marketplace/item/" not in href:
+                continue
+
+            # Facebook inserisce nella stessa pagina sezioni tipo
+            # "More Options"/"Altre opzioni" con annunci non pertinenti.
+            if is_suggestion_card(text):
+                print("↪️ Suggerimento Facebook ignorato")
                 continue
 
             try:
@@ -1024,6 +1140,24 @@ def process_search(context, search):
             )
             continue
 
+        if not query_matches_listing(
+            query_name,
+            item["title"],
+            description,
+        ):
+            print(
+                f"🚫 Scartato perché non pertinente "
+                f"alla query: {query_name}"
+            )
+            continue
+
+        if item["item_id"] in cycle_notified:
+            print(
+                "↪️ Annuncio già notificato da "
+                "un'altra ricerca in questo ciclo"
+            )
+            continue
+
         published_at = parse_relative_time(
             item["relative_time"]
         )
@@ -1082,6 +1216,8 @@ def process_search(context, search):
             ))
 
             conn.commit()
+
+            cycle_notified.add(item["item_id"])
 
             print(
                 "✅ Notifica Telegram inviata"
@@ -1172,11 +1308,14 @@ def main():
             "valid"
         )
 
+        cycle_notified = set()
+
         for search in searches:
             try:
                 process_search(
                     context,
                     search,
+                    cycle_notified,
                 )
             except Exception as exc:
                 print(
