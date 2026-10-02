@@ -58,6 +58,21 @@ def init_group_tables():
             UNIQUE(group_id, post_id, search_id)
         )
     """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_listings (
+            group_id TEXT NOT NULL,
+            post_id TEXT NOT NULL,
+            post_url TEXT,
+            title TEXT,
+            location TEXT,
+            detected_price REAL,
+            post_text TEXT,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            PRIMARY KEY (group_id, post_id)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -236,6 +251,48 @@ def mark_seen(post_id, url):
         VALUES(?,?,?,?)
         """,
         (GROUP_ID, post_id, datetime.now().isoformat(), url),
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_group_listing(post_id, url, title, location, price, text):
+    now = datetime.now().isoformat()
+
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO group_listings(
+            group_id,
+            post_id,
+            post_url,
+            title,
+            location,
+            detected_price,
+            post_text,
+            first_seen,
+            last_seen
+        )
+        VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(group_id, post_id) DO UPDATE SET
+            post_url=excluded.post_url,
+            title=excluded.title,
+            location=excluded.location,
+            detected_price=excluded.detected_price,
+            post_text=excluded.post_text,
+            last_seen=excluded.last_seen
+        """,
+        (
+            GROUP_ID,
+            post_id,
+            url,
+            title,
+            location,
+            price,
+            text,
+            now,
+            now,
+        ),
     )
     conn.commit()
     conn.close()
@@ -520,6 +577,15 @@ def run_cycle(browser):
             title, location, price = extract_listing_fields(
                 text,
                 post.get("link_text", ""),
+            )
+
+            save_group_listing(
+                post_id,
+                post["url"],
+                title,
+                location,
+                price,
+                text,
             )
 
             matches = []
