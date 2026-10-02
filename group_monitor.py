@@ -12,6 +12,7 @@ import unicodedata
 import requests
 
 from database import init_search_tables, get_searches, get_blacklist
+from distance import distance_from_home
 
 DATABASE = "marketplace.db"
 FACEBOOK_STATE = "facebook_state.json"
@@ -107,7 +108,7 @@ def blacklist_match(search_id, text):
 def extract_price(text):
     patterns = [
         r"(?:€\s*|eur\s*)(\d{1,5}(?:[.,]\d{1,2})?)",
-        r"(\d{1,5}(?:[.,]\d{1,2})?)\s*(?:€|eur)\b",
+        r"(\d{1,5}(?:[.,]\d{1,2})?)\s*(?:€|eur)",
     ]
     for pattern in patterns:
         m = re.search(pattern, text or "", re.I)
@@ -117,6 +118,63 @@ def extract_price(text):
             except ValueError:
                 pass
     return None
+
+
+def extract_listing_fields(text, link_text=""):
+    source = (link_text or text or "").replace("\xa0", " ")
+    compact = re.sub(r"\s+", " ", source).strip()
+
+    price = extract_price(source)
+
+    location = ""
+    m = re.search(
+        r"[·•]?\s*([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý '\\-]+,\s*ITALIA)",
+        compact,
+        re.I,
+    )
+    if m:
+        location = m.group(1).strip()
+
+    title = ""
+
+    if location:
+        # Negli annunci Commerce il formato tipico è:
+        # PREZZO · CITTÀ, ITALIA TITOLO Messaggio
+        after_location = compact.split(location, 1)[1].strip(" ·-")
+        after_location = re.sub(
+            r"\b(?:Invia di nuovo messaggio|Invia messaggio|Messaggio|Post condiviso)\b.*$",
+            "",
+            after_location,
+            flags=re.I,
+        ).strip()
+        if after_location:
+            title = after_location
+
+    if not title:
+        lines = [
+            re.sub(r"\s+", " ", line).strip()
+            for line in source.splitlines()
+            if line.strip()
+        ]
+        ignored = (
+            "messaggio",
+            "post condiviso",
+            "invia di nuovo messaggio",
+        )
+        for line in reversed(lines):
+            low = line.lower()
+            if any(x in low for x in ignored):
+                continue
+            if "€" in line or "italia" in low:
+                continue
+            if line:
+                title = line
+                break
+
+    if not title:
+        title = "Annuncio Facebook"
+
+    return title[:180], location, price
 
 
 def price_matches(search, price):
@@ -200,23 +258,33 @@ def save_notification(post_id, search_id, url, text, price):
     conn.close()
 
 
-def send_telegram(search, post_id, url, text, price, photo_url=""):
+def send_telegram(search, post_id, url, text, price, title, location, photo_url=""):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID mancanti")
         return False
 
-    preview = " ".join((text or "").split())
-    if len(preview) > 700:
-        preview = preview[:697] + "..."
-
     price_line = f"{price:g} €" if price is not None else "non rilevato"
+    location_line = location or "Località non rilevata"
+
+    distance_km = distance_from_home(location) if location else None
+
+    if distance_km is None:
+        distance_line = "🚗 Distanza da Palmi: non disponibile"
+    elif distance_km <= 20:
+        distance_line = f"🔥 <b>{distance_km} km da Palmi</b>"
+    else:
+        distance_line = f"🚗 Circa <b>{distance_km} km da Palmi</b>"
+
+    safe_url = escape(url, quote=True)
+    safe_title = escape(title or "Annuncio Facebook")
 
     message = (
         "🔵 <b>GRUPPO FACEBOOK</b>\n\n"
-        f"🔎 Match: <b>{escape(search['query'])}</b>\n"
-        f"💰 Prezzo: <b>{escape(price_line)}</b>\n\n"
-        f"{escape(preview)}\n\n"
-        f'🔗 <a href="{escape(url)}">Apri il post</a>'
+        f'🔗 <b><a href="{safe_url}">{safe_title}</a></b>\n\n'
+        f"💰 Prezzo: <b>{escape(price_line)}</b>\n"
+        f"📍 {escape(location_line)}\n"
+        f"{distance_line}\n"
+        f"🔎 Match: <b>{escape(search['query'])}</b>"
     )
 
     endpoint = "sendPhoto" if photo_url else "sendMessage"
@@ -333,7 +401,11 @@ def collect_posts(page):
                     }
                 }
 
-                return {text, photo};
+                return {
+                    text,
+                    photo,
+                    linkText: (node.innerText || "").trim()
+                };
             }
             """)
         except Exception:
@@ -353,6 +425,7 @@ def collect_posts(page):
             "post_id": post_id,
             "url": url,
             "text": text,
+            "link_text": data.get("linkText") or "",
             "photo_url": data.get("photo") or "",
         })
 
@@ -404,7 +477,10 @@ def run_cycle(browser):
 
             new_count += 1
             text = post["text"]
-            price = extract_price(text)
+            title, location, price = extract_listing_fields(
+                text,
+                post.get("link_text", ""),
+            )
 
             matches = []
             for search in searches:
@@ -428,6 +504,8 @@ def run_cycle(browser):
                     post["url"],
                     text,
                     price,
+                    title,
+                    location,
                     post["photo_url"],
                 ):
                     notify_count += 1
