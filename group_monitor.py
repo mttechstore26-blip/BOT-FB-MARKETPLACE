@@ -258,7 +258,7 @@ def save_notification(post_id, search_id, url, text, price):
     conn.close()
 
 
-def send_telegram(search, post_id, url, text, price, title, location, photo_url=""):
+def send_telegram(searches, post_id, url, text, price, title, location, photo_url=""):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID mancanti")
         return False
@@ -275,6 +275,14 @@ def send_telegram(search, post_id, url, text, price, title, location, photo_url=
     else:
         distance_line = f"🚗 Circa <b>{distance_km} km da Palmi</b>"
 
+    match_names = []
+    for search in searches:
+        name = search["query"]
+        if name not in match_names:
+            match_names.append(name)
+
+    match_line = " / ".join(match_names)
+
     safe_url = escape(url, quote=True)
     safe_title = escape(title or "Annuncio Facebook")
 
@@ -284,7 +292,7 @@ def send_telegram(search, post_id, url, text, price, title, location, photo_url=
         f"💰 Prezzo: <b>{escape(price_line)}</b>\n"
         f"📍 {escape(location_line)}\n"
         f"{distance_line}\n"
-        f"🔎 Match: <b>{escape(search['query'])}</b>"
+        f"🔎 Match: <b>{escape(match_line)}</b>"
     )
 
     endpoint = "sendPhoto" if photo_url else "sendMessage"
@@ -307,7 +315,7 @@ def send_telegram(search, post_id, url, text, price, title, location, photo_url=
             timeout=30,
         )
         if response.ok and response.json().get("ok"):
-            print(f"📨 Telegram: {search['query']} | post {post_id}")
+            print(f"📨 Telegram: {match_line} | post {post_id}")
             return True
         print("❌ Telegram:", response.text)
     except Exception as exc:
@@ -529,9 +537,9 @@ def run_cycle(browser):
             # Segniamo visto dopo aver valutato tutte le ricerche.
             mark_seen(post_id, post["url"])
 
-            for search in matches:
+            if matches:
                 if send_telegram(
-                    search,
+                    matches,
                     post_id,
                     post["url"],
                     text,
@@ -541,13 +549,15 @@ def run_cycle(browser):
                     post["photo_url"],
                 ):
                     notify_count += 1
-                    save_notification(
-                        post_id,
-                        search["id"],
-                        post["url"],
-                        text,
-                        price,
-                    )
+
+                    for search in matches:
+                        save_notification(
+                            post_id,
+                            search["id"],
+                            post["url"],
+                            text,
+                            price,
+                        )
 
         print(f"✅ Ciclo: nuovi={new_count} notifiche={notify_count}")
 
