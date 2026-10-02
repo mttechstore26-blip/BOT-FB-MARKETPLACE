@@ -333,6 +333,36 @@ def validate_session(page):
     ))
 
 
+def set_newest_sort(page):
+    """
+    Imposta il feed del gruppo su 'Nuovi annunci' prima della lettura.
+    Facebook apre spesso i gruppi su 'Annunci più popolari'.
+    """
+    try:
+        current = page.get_by_text("Annunci più popolari", exact=True)
+        if current.count() == 0:
+            print("⚠️ Selettore ordinamento non trovato")
+            return False
+
+        current.first.click(timeout=5000)
+        page.wait_for_timeout(800)
+
+        newest = page.get_by_text("Nuovi annunci", exact=True)
+        if newest.count() == 0:
+            print("⚠️ Voce 'Nuovi annunci' non trovata")
+            return False
+
+        newest.first.click(timeout=5000)
+        page.wait_for_timeout(2500)
+
+        print("🆕 Ordinamento: Nuovi annunci")
+        return True
+
+    except Exception as exc:
+        print("⚠️ Impossibile impostare 'Nuovi annunci':", exc)
+        return False
+
+
 def collect_posts(page):
     """
     Raccoglie gli annunci condivisi nel gruppo.
@@ -455,6 +485,8 @@ def run_cycle(browser):
         if not validate_session(page):
             print("❌ Sessione Facebook non valida")
             return
+
+        set_newest_sort(page)
 
         # Piccolo scroll per permettere al feed di caricare alcuni post.
         for _ in range(2):
