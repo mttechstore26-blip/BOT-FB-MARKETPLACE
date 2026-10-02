@@ -135,12 +135,20 @@ def canonical_post_url(href):
     if not href:
         return ""
     url = urljoin("https://www.facebook.com", href)
+
+    # Per gli annunci condivisi nei gruppi Facebook l'URL più stabile
+    # è spesso /commerce/listing/<id>/ invece del permalink del post.
+    m = re.search(r"/commerce/listing/(\d+)", url)
+    if m:
+        return f"https://www.facebook.com/commerce/listing/{m.group(1)}/"
+
     url = url.split("?")[0]
     return url.rstrip("/")
 
 
 def extract_post_id(url):
     patterns = [
+        r"/commerce/listing/(\d+)",
         rf"/groups/{re.escape(GROUP_ID)}/posts/(\d+)",
         r"/permalink/(\d+)",
         r"/posts/(\d+)",
@@ -258,65 +266,98 @@ def validate_session(page):
 
 
 def collect_posts(page):
-    # Gruppi Facebook moderni: i post sono generalmente article dentro il feed.
-    articles = page.locator('div[role="feed"] div[role="article"]')
-    if articles.count() == 0:
-        articles = page.locator('div[role="article"]')
+    """
+    Raccoglie gli annunci condivisi nel gruppo.
+
+    Facebook, per i post di compravendita, spesso non espone un permalink
+    /groups/.../posts/... nel DOM. Espone invece uno o più link
+    /commerce/listing/<id>/ all'interno del contenitore del post.
+    """
 
     posts = []
     seen_ids = set()
 
-    for i in range(min(articles.count(), MAX_POSTS_PER_CYCLE)):
-        article = articles.nth(i)
+    # Partiamo direttamente dai link Commerce: sono l'elemento più stabile
+    # osservato nel DOM del gruppo.
+    commerce_links = page.locator('a[href*="/commerce/listing/"]')
+
+    for i in range(min(commerce_links.count(), MAX_POSTS_PER_CYCLE * 10)):
+        link_el = commerce_links.nth(i)
 
         try:
-            text = article.inner_text(timeout=5000).strip()
+            href = link_el.get_attribute("href") or ""
         except Exception:
             continue
 
-        if not text:
-            continue
-
-        link = ""
-        post_id = None
-
-        try:
-            anchors = article.locator(
-                f'a[href*="/groups/{GROUP_ID}/posts/"], '
-                'a[href*="/permalink/"], a[href*="/posts/"]'
-            )
-            for j in range(min(anchors.count(), 12)):
-                href = anchors.nth(j).get_attribute("href") or ""
-                candidate = canonical_post_url(href)
-                candidate_id = extract_post_id(candidate)
-                if candidate_id:
-                    link = candidate
-                    post_id = candidate_id
-                    break
-        except Exception:
-            pass
+        url = canonical_post_url(href)
+        post_id = extract_post_id(url)
 
         if not post_id or post_id in seen_ids:
             continue
 
-        photo_url = ""
+        # Risaliamo fino al contenitore che include testo annuncio, prezzo
+        # e intestazione del post. Il DOM Facebook è molto annidato.
         try:
-            imgs = article.locator("img")
-            for j in range(min(imgs.count(), 10)):
-                src = imgs.nth(j).get_attribute("src") or ""
-                if src.startswith("http") and ("scontent" in src or "fbcdn" in src):
-                    photo_url = src
-                    break
+            data = link_el.evaluate("""
+            (node) => {
+                let current = node;
+                let best = null;
+
+                for (let level = 0; level < 30 && current; level++, current = current.parentElement) {
+                    const text = (current.innerText || "").trim();
+                    if (!text) continue;
+
+                    const hasPrice = /(?:€|EUR)/i.test(text);
+                    const hasCommerce = !!current.querySelector('a[href*="/commerce/listing/"]');
+
+                    if (hasCommerce && hasPrice) {
+                        best = current;
+
+                        // Fermati quando il blocco sembra contenere il post completo
+                        // ma non l'intero feed.
+                        const role = current.getAttribute("role");
+                        if (role === "article" || text.length > 80) break;
+                    }
+                }
+
+                if (!best) return null;
+
+                const text = (best.innerText || "").trim();
+
+                let photo = "";
+                for (const img of best.querySelectorAll("img")) {
+                    const src = img.src || "";
+                    if (src.includes("scontent") || src.includes("fbcdn")) {
+                        photo = src;
+                        break;
+                    }
+                }
+
+                return {text, photo};
+            }
+            """)
         except Exception:
-            pass
+            data = None
+
+        if not data or not data.get("text"):
+            continue
+
+        text = data["text"].strip()
+
+        # Evita di prendere blocchi giganteschi (es. intero feed/sidebar).
+        if len(text) > 8000:
+            continue
 
         seen_ids.add(post_id)
         posts.append({
             "post_id": post_id,
-            "url": link,
+            "url": url,
             "text": text,
-            "photo_url": photo_url,
+            "photo_url": data.get("photo") or "",
         })
+
+        if len(posts) >= MAX_POSTS_PER_CYCLE:
+            break
 
     return posts
 
