@@ -15,12 +15,13 @@ from database import init_search_tables, get_searches, get_blacklist
 
 DATABASE = "marketplace.db"
 FACEBOOK_STATE = "facebook_state.json"
+
+load_dotenv(".env")
+
 GROUP_ID = os.getenv("FACEBOOK_GROUP_ID", "327948723950502")
 GROUP_URL = f"https://www.facebook.com/groups/{GROUP_ID}/"
 CHECK_INTERVAL_SECONDS = int(os.getenv("FB_GROUP_CHECK_INTERVAL", "300"))
 MAX_POSTS_PER_CYCLE = int(os.getenv("FB_GROUP_MAX_POSTS", "25"))
-
-load_dotenv(".env")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -396,11 +397,6 @@ def run_cycle(browser):
                         text,
                         price,
                     )
-
-        try:
-            context.storage_state(path=FACEBOOK_STATE)
-        except Exception:
-            pass
 
         print(f"✅ Ciclo: nuovi={new_count} notifiche={notify_count}")
 
