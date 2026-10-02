@@ -1,0 +1,15 @@
+[Unit]
+Description=Facebook Private Group Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/facebook-marketplace-monitor
+ExecStart=/opt/facebook-marketplace-monitor/.venv/bin/python /opt/facebook-marketplace-monitor/group_monitor.py
+Restart=always
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
